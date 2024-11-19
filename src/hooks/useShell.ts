@@ -64,6 +64,13 @@ export function useShell(): ShellInstance {
     await shell.spawn('mv', ['.jshrc', '/home/.jshrc']);
     shell.mount(startFiles);
 
+    // Get .env from localStorage
+    const configRaw = localStorage.getItem('vslite_config');
+    const config = configRaw ? JSON.parse(configRaw) : {};
+    if (config?.env) {
+      await shell.fs.writeFile('.env', config.env);
+    }
+
     // Setup terminal
     const terminal = new Terminal({convertEol: true, theme});
     const addon = new FitAddon();
@@ -75,7 +82,10 @@ export function useShell(): ShellInstance {
     const watch = await shell.spawn('npx', ['-y', 'chokidar-cli', '.', '-i', '"(**/(node_modules|.git|_tmp_)**)"']);
     watch.output.pipeTo(new WritableStream({
       async write(data) {
-        const type: string = data.split(':').at(0) || ''
+        // Check if it is .env and read it into local storage
+        if (data.match(/\.env/))
+          await loadEnv(shell, data);
+        const type: string = data.split(':').at(0) || '';
         if (watchReady) {
           debug('Change detected: ', data);
         } else if (data.includes('Watching "."')) {
@@ -151,4 +161,24 @@ export function useShell(): ShellInstance {
   }, []);
 
   return { terminal, container, process, start };
+}
+
+async function loadEnv(shell: WebContainer, data: string) { 
+  const configRaw = globalThis.localStorage?.vslite_config;
+  let config = configRaw ? JSON.parse(configRaw) : {};
+  debug('.env changed', data);
+  try {
+    const bContents = await shell.fs.readFile('.env');
+    const sContents = new TextDecoder().decode(bContents);
+    debug('contents', sContents);
+    if(!config) config = {};
+    config.env = sContents;
+    localStorage.setItem('vslite_config', JSON.stringify(config));
+  } catch(e) {
+    if (config?.env) {
+      delete config.env;
+      localStorage.setItem('vslite_config', JSON.stringify(config));        
+    }
+    debug('.env file deleted', e);
+  }
 }
